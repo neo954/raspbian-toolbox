@@ -1,0 +1,615 @@
+#!/bin/bash
+#
+# Reform raspbian image to LVM partition layout
+#
+
+################################
+####     Configurations     ####
+################################
+TARGET_IMAGE_SIZE_LIMIT="6GB"
+TARGET_BOOT_PART_OFFSET="4MiB"
+TARGET_BOOT_PART_SIZE="200MiB"
+TARGET_LVM_VG_NAME="sd0"
+TARGET_LVM_LV_000=("root"  "/"          "512MiB" "ext4")
+TARGET_LVM_LV_001=("home"  "/home"      "512MiB" "ext4")
+TARGET_LVM_LV_002=("opt"   "/opt"       "512MiB" "ext4")
+TARGET_LVM_LV_003=("srv"   "/srv"       "128MiB" "ext4")
+TARGET_LVM_LV_004=("tmp"   "/tmp"       "512MiB" "ext4")
+TARGET_LVM_LV_005=("var"   "/var"      "1024MiB" "ext4")
+TARGET_LVM_LV_006=("usr"   "/usr"      "2048MiB" "ext4")
+TARGET_LVM_LV_007=("local" "/usr/local" "128MiB" "ext4")
+################################
+
+SRC_DIR="/tmp/source"
+DST_DIR="/tmp/target"
+
+#
+# warn_if_bad		Put out warning message(s) if $1 has bad RC.
+#
+#	$1	0 (pass) or non-zero (fail).
+#	$2+	Remaining arguments printed only if the $1 is non-zero.
+#
+#	Incoming $1 is returned unless it is 0
+#
+function warn_if_bad()
+{
+	local -i rc="$1"
+	local script="${0##*/}"
+
+	# Ignore if no problems
+	[ "${rc}" -eq "0" ] && return 0
+
+	# Broken
+	shift
+	echo "${script}: $@" >&2
+	return "${rc}"
+}
+
+#
+# exit_if_bad		Put out error message(s) if $1 has bad RC.
+#
+#	$1	0 (pass) or non-zero (fail).
+#	$2+	Remaining arguments printed only if the $1 is non-zero.
+#
+#               Exits with 1 unless $1 is 0
+#
+function exit_if_bad()
+{
+	warn_if_bad "$@" || exit 1
+	return 0
+}
+
+#
+# check_root_or_exit
+#
+#	Breaks the script if not running as root.
+#
+#	If this returns 1, the invoker MUST abort the script.
+#
+#	Returns 0 if running as root
+#	Returns 1 if not (and breaks the script)
+#
+function check_root_or_exit()
+{
+	[ "${UID}" -eq "0" ]
+	exit_if_bad "$?" "Must be run by UID=0. Actual UID=${UID}."
+	return 0
+}
+
+#
+# check_executes	Check for executable(s)
+#
+#	Returns 0 if true.
+#	Returns 1 if not.
+#
+function check_executes()
+{
+	local cmd
+	local all_ok="yes"
+	for cmd in "$@"
+	do
+		if ! type "${cmd}" &>/dev/null
+		then
+			echo "Command \"${cmd}\" not found." >&2
+			all_ok="no"
+		fi
+	done
+	[ "${all_ok}" = "yes" ]
+}
+
+#
+# check_exec_or_exit	Check for required executables.
+#
+#	Exits (not returns) if commands listed on command line do not exist.
+#
+#	Returns 0 if true.
+#	Exits with 1 if not.
+#
+function check_exec_or_exit()
+{
+	check_executes "$@"
+	exit_if_bad "$?" "Above listed required command(s) not found."
+	return 0
+}
+
+TMP_DIR=""
+
+#
+# internal_setup	Script setup
+#
+#	Returns 0 on success.
+#	Exits (not returns) with 1 on failure.
+#
+function internal_setup()
+{
+	shopt -s extglob
+
+	# Trap exit for internal_cleanup function.
+	trap "internal_cleanup" EXIT
+
+	check_exec_or_exit mktemp rm
+
+	umask 0077
+
+	TMP_DIR="$(mktemp -d "/tmp/${0##*/}.XXXXXXXX" 2>/dev/null)"
+	[ -d "${TMP_DIR}" ]
+	exit_if_bad "$?" "Make temporary directory failed."
+
+	custom_setup
+}
+
+#
+# internal_cleanup	Script cleanup (reached via trap 0)
+#
+#	Destory any temporarily facility created by internal_setup.
+#
+function internal_cleanup()
+{
+	custom_cleanup
+
+	[ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}"
+}
+
+#
+# custom_setup
+#
+function custom_setup()
+{
+	check_exec_or_exit mount umount mkdir rm
+	check_exec_or_exit cat df dd parted sed tac losetup
+	check_exec_or_exit mkfs.vfat mkfs.ext4
+	check_exec_or_exit vgchange pvcreate vgcreate lvcreate pvscan
+	check_exec_or_exit qemu-arm-static
+	check_root_or_exit
+}
+
+#
+#	$1	Base directory
+#
+function umount_all()
+{
+	local base_dir="$1"
+
+	while read -r dev dir type options
+	do
+		if [ "${base_dir}" = "${dir:0:${#base_dir}}" ]
+		then
+			umount "${dir}" 2>/dev/null || {
+				sleep 1 &&
+				umount "${dir}" 2>/dev/null
+			}
+			warn_if_bad "$?" "Fail to umount ${dir}"
+		fi
+	done < <(tac /proc/mounts 2>/dev/null)
+}
+
+#
+# custom_cleanup
+#
+function custom_cleanup()
+{
+	umount_all "${DST_DIR}"
+
+	vgchange -a n "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+
+	pvscan --cache >/dev/null 2>&1
+
+	losetup -D "${REFORMED_PART2_DEVICE}" 2>/dev/null
+	losetup -D "${REFORMED_PART1_DEVICE}" 2>/dev/null
+
+	umount_all "${SRC_DIR}"
+
+	losetup -D "${RASPBIAN_PART2_DEVICE}" 2>/dev/null
+	losetup -D "${RASPBIAN_PART1_DEVICE}" 2>/dev/null
+}
+
+internal_setup
+
+function usage()
+{
+        local script="${0##*/}"
+
+	while read -r ; do echo "${REPLY}" ; done <<-EOF
+	Usage: ${script} [OPTION]... [IMAGE]
+	Reform raspbian image to LVM partition layout.
+
+	Options:
+	  -h, --help                    display this help and exit
+
+	Example:
+	  ${script} /path/to/2018-06-27-raspbian-stretch-lite.img
+	EOF
+}
+
+while [ "$#" -gt "0" ]
+do
+	case "$1" in
+	"-h"|"--help")
+		usage
+		exit 0
+		;;
+	"-"*)
+		warn_if_bad 1 "invalid option -- \`$1'"
+		exit_if_bad 1 "Try \`$0 --help' for more information"
+		;;
+	*)
+		[ "$1" == "--" ] && shift
+		[ -z "${RASPBIAN_IMAGE}" ]
+		warn_if_bad "$?" "redundancy command line argument -- \`$1'"
+		exit_if_bad "$?" "Try \`$0 --help' for more information"
+		RASPBIAN_IMAGE="$1"
+		;;
+	esac
+	shift
+done
+
+[ -z "${RASPBIAN_IMAGE}" ] && usage && exit 1
+[ -f "${RASPBIAN_IMAGE}" ]
+exit_if_bad "$?" "File not found -- \`${RASPBIAN_IMAGE}'"
+[ -r "${RASPBIAN_IMAGE}" ]
+exit_if_bad "$?" "Permission denied -- \`${RASPBIAN_IMAGE}'"
+
+parted "${RASPBIAN_IMAGE}" -- "unit s" "print"
+
+while read -r e{0..6}
+do
+	case "${e0}" in
+	"Disk")
+		[ "${e1:0:1}" = "/" ] && RASPBIAN_IMAGE_SIZE="${e2}"
+		;;
+	"Sector")
+		RASPBIAN_SECTOR_SIZE="${e3%%/*}"
+		;;
+	"Partition")
+		RASPBIAN_PARTITION_TABLE="${e2}"
+		;;
+	"1")
+		RASPBIAN_PART1_OFFSET="$(( "${e1%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		RASPBIAN_PART1_SIZE="$(( "${e3%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		;;
+	"2")
+		RASPBIAN_PART2_OFFSET="$(( "${e1%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		RASPBIAN_PART2_SIZE="$(( "${e3%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		;;
+	esac
+done < <(parted "${RASPBIAN_IMAGE}" -- "unit s" "print")
+unset e{0..6}
+
+[ -n "${RASPBIAN_IMAGE_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_IMAGE_SIZE"
+[ -n "${RASPBIAN_SECTOR_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_SECTOR_SIZE"
+[ -n "${RASPBIAN_PARTITION_TABLE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PARTITION_TABLE"
+[ -n "${RASPBIAN_PART1_OFFSET}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART1_OFFSET"
+[ -n "${RASPBIAN_PART1_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART1_SIZE"
+[ -n "${RASPBIAN_PART2_OFFSET}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART2_OFFSET"
+[ -n "${RASPBIAN_PART2_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART2_SIZE"
+
+RASPBIAN_PART1_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 1"
+losetup --offset "${RASPBIAN_PART1_OFFSET}" \
+	--sizelimit "${RASPBIAN_PART1_SIZE}" \
+	"${RASPBIAN_PART1_DEVICE}" "${RASPBIAN_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 1"
+
+RASPBIAN_PART2_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 2"
+losetup --offset "${RASPBIAN_PART2_OFFSET}" \
+	--sizelimit "${RASPBIAN_PART2_SIZE}" \
+	"${RASPBIAN_PART2_DEVICE}" "${RASPBIAN_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 2"
+
+mkdir -p "${SRC_DIR}"
+
+mount -o ro "${RASPBIAN_PART2_DEVICE}" "${SRC_DIR}"
+mount -o ro "${RASPBIAN_PART1_DEVICE}" "${SRC_DIR}/boot"
+
+REFORMED_IMAGE="${RASPBIAN_IMAGE%.img}-lvm.img"
+REFORMED_PARTITION_TABLE="${RASPBIAN_PARTITION_TABLE}"
+REFORMED_SECTOR_SIZE="${RASPBIAN_SECTOR_SIZE}"
+REFORMED_IMAGE_SIZE="$(( "${TARGET_IMAGE_SIZE_LIMIT%GB}" * ( 10 ** 9 ) / ( 2 ** 20 ) * ( 2 ** 20 ) / "${RASPBIAN_SECTOR_SIZE%B}" ))s"
+
+rm -f "${REFORMED_IMAGE}"
+dd if=/dev/zero "of=${REFORMED_IMAGE}" bs=1 count=1 \
+	"seek=$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - 1 ))" \
+	>/dev/null 2>&1
+
+REFORMED_PART1_OFFSET="$(( "${TARGET_BOOT_PART_OFFSET%MiB}" * ( 2 ** 20 ) ))"
+REFORMED_PART1_SIZE="$(( "${TARGET_BOOT_PART_SIZE%MiB}" * ( 2 ** 20 ) ))"
+
+REFORMED_PART2_OFFSET="$(( "${REFORMED_PART1_OFFSET}" + "${REFORMED_PART1_SIZE}" ))"
+REFORMED_PART2_SIZE="$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - "${REFORMED_PART2_OFFSET}" ))"
+
+parted "${REFORMED_IMAGE}" -- "unit s" "mktable ${REFORMED_PARTITION_TABLE}" \
+	"mkpart primary fat32 $(( "${REFORMED_PART1_OFFSET}" / "${REFORMED_SECTOR_SIZE%B}" ))s $(( ( "${REFORMED_PART1_OFFSET}" + "${REFORMED_PART1_SIZE}" ) / "${REFORMED_SECTOR_SIZE%B}" - 1 ))s" \
+	"mkpart primary $(( "${REFORMED_PART2_OFFSET}" / "${REFORMED_SECTOR_SIZE%B}" ))s  $(( ( "${REFORMED_PART2_OFFSET}" + "${REFORMED_PART2_SIZE}" ) / "${REFORMED_SECTOR_SIZE%B}" - 1 ))s" \
+	"set 2 lvm on"
+exit_if_bad "$?" "Fail to partition the reshape image"
+
+REFORMED_PART1_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 1"
+losetup --offset "${REFORMED_PART1_OFFSET}" \
+	--sizelimit "${REFORMED_PART1_SIZE}" \
+	"${REFORMED_PART1_DEVICE}" "${REFORMED_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 1"
+
+REFORMED_PART2_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 1"
+losetup --offset "${REFORMED_PART2_OFFSET}" \
+	--sizelimit "${REFORMED_PART2_SIZE}" \
+	"${REFORMED_PART2_DEVICE}" "${REFORMED_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 1"
+
+mkfs.vfat -n boot -F 32 "${REFORMED_PART1_DEVICE}" >/dev/null 2>&1
+exit_if_bad "$?" "Fail to mkfs.vfat ${REFORMED_PART1_DEVICE}"
+
+pvcreate --yes --dataalignment 128K "${REFORMED_PART2_DEVICE}" >/dev/null
+exit_if_bad "$?" "Fail to create physical volume ${REFORMED_PART2_DEVICE}"
+
+vgcreate --yes "${TARGET_LVM_VG_NAME}" "${REFORMED_PART2_DEVICE}" >/dev/null
+exit_if_bad "$?" "Fail to create volume group ${TARGET_LVM_VG_NAME}"
+
+for e in ${!TARGET_LVM_LV_*}
+do
+	r="${e}[0]"
+	lvm_lv_name="${!r}"
+	r="${e}[2]"
+	lvm_lv_size="${!r}"
+
+	lvcreate --yes --size "${lvm_lv_size%MiB}M" --name "${lvm_lv_name}" \
+		"${TARGET_LVM_VG_NAME}" >/dev/null
+	exit_if_bad "$?" "Fail to create logical volume ${lvm_lv_name}"
+done
+unset e r lvm_lv_{name,size}
+
+for e in ${!TARGET_LVM_LV_*}
+do
+	r="${e}[0]"
+	lvm_lv_name="${!r}"
+	r="${e}[3]"
+	lvm_lv_fs="${!r}"
+
+	case "${lvm_lv_fs}" in
+	"swap")
+		mkswap "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkswap /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+		;;
+	*)
+		"mkfs.${lvm_lv_fs}" "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkfs.${lvm_lv_fs} /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+		;;
+	esac
+done
+unset e r lvm_lv_{name,fs}
+
+mkdir -p "${DST_DIR}"
+
+for e in ${!TARGET_LVM_LV_*}
+do
+	r="${e}[0]"
+	lvm_lv_name="${!r}"
+	r="${e}[1]"
+	lvm_lv_mount="${!r}"
+
+	if [ "${lvm_lv_mount:0:1}" != "/" ]
+	then
+		continue
+	fi
+
+	mkdir -p "${DST_DIR}${lvm_lv_mount%/}"
+	exit_if_bad "$?" "Fail to mkdir ${DST_DIR}${lvm_lv_mount%/}"
+
+	mount "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" "${DST_DIR}${lvm_lv_mount%/}"
+	exit_if_bad "$?" "Fail to mount /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+done
+unset e r lvm_lv_{name,mount}
+
+mkdir -p "${DST_DIR}/boot"
+exit_if_bad "$?" "Fail to mkdir ${DST_DIR}/boot"
+mount "${REFORMED_PART1_DEVICE}" "${DST_DIR}/boot"
+exit_if_bad "$?" "Fail to mount ${REFORMED_PART1_DEVICE}"
+
+################################
+####       File copy        ####
+################################
+( cd "${SRC_DIR}" && tar cf - . 2>/dev/null ) | ( cd "${DST_DIR}" && tar xf - )
+exit_if_bad "$?" "Failed to copy files"
+
+################################
+####    Hack /etc/fstab     ####
+################################
+(
+	cat <<-'EOF'
+	# /etc/fstab: static file system information.
+	#
+	# Use 'blkid' to print the universally unique identifier for a
+	# device; this may be used with UUID= as a more robust way to name devices
+	# that works even if disks are added and removed. See fstab(5).
+	#
+	# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+	EOF
+
+	for e in ${!TARGET_LVM_LV_*}
+	do
+		r="${e}[0]"
+		lvm_lv_name="${!r}"
+		r="${e}[1]"
+		lvm_lv_mount="${!r}"
+		r="${e}[3]"
+		lvm_lv_fs="${!r}"
+
+		dump="0"
+		pass="2"
+
+		case "${lvm_lv_fs}" in
+		"ext4")
+			options="discard"
+			;;
+		"swap")
+			options="sw"
+			lvm_lv_mount="none"
+			pass="0"
+			;;
+		esac
+
+		case "${lvm_lv_mount}" in
+		"/")
+			options+=",noatime,nodiratime,errors=remount-ro"
+			pass="1"
+			;;
+		"/home")
+			options+=",usrquota,grpquota,user_xattr"
+			;;
+		"/srv"|"/var")
+			options+=",relatime"
+			;;
+		"/tmp")
+			options+=",relatime,nodev,nosuid"
+			;;
+		"/opt"|"/usr"|"/usr/local")
+			options+=",noatime,nodiratime"
+			;;
+		esac
+
+		printf "%-15s %-15s %-7s %-15s %-7s %s\n" \
+			"/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" \
+			"${lvm_lv_mount}" "${lvm_lv_fs}" \
+			"${options}" "${dump}" "${pass}"
+
+		if [ "${e: -3}" = "000" ]
+		then
+			# The boot partition right after the root partition
+			printf "%-15s %-15s %-7s %-15s %-7s %s\n" \
+				"UUID=$(blkid -c /dev/null "${REFORMED_PART1_DEVICE}" -s UUID -o value)" \
+				/boot vfat umask=0077 0 2
+		fi
+	done
+	unset e r lvm_lv_{name,mount,fs} options dump pass
+) >"${DST_DIR}/etc/fstab"
+
+################################
+#### Install extra packages ####
+################################
+
+DEBIAN_CODENAME="$(source "${DST_DIR}/etc/os-release" && VERSION="${VERSION##*\(}" && VERSION="${VERSION%%\)*}" && echo "${VERSION}" )"
+
+# Use a different apt mirror site
+sed -i -e 's|^deb|#deb|g' "${DST_DIR}/etc/apt/sources.list"
+cat >>"${DST_DIR}/etc/apt/sources.list" <<-EOF
+
+deb http://mirrors.tuna.tsinghua.edu.cn/raspbian/raspbian/ ${DEBIAN_CODENAME} main contrib non-free rpi
+EOF
+
+# Hack before chroot
+mount --bind /dev     "${DST_DIR}/dev"
+mount --bind /dev/pts "${DST_DIR}/dev/pts"
+mount --bind /sys     "${DST_DIR}/sys"
+mount --bind /proc    "${DST_DIR}/proc"
+
+cp /usr/bin/qemu-arm-static "${DST_DIR}/usr/bin"
+exit_if_bad "$?" "Failed to copy /usr/bin/qemu-arm-static"
+
+# Do the chroot works
+# Tweak /etc/resolv.conf
+grep '^nameserver' /etc/resolv.conf >"${DST_DIR}/etc/resolv.conf"
+
+# Enable the generation of initrd.img
+sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
+	"${DST_DIR}/etc/default/raspberrypi-kernel"
+
+# Change default locale to en_US.UTF-8
+sed -i  -e 's|en_GB.UTF-8 UTF-8|# en_GB.UTF-8 UTF-8|' \
+	-e 's|# en_US.UTF-8 UTF-8|en_US.UTF-8 UTF-8|' \
+	"${DST_DIR}/etc/locale.gen"
+
+chroot "${DST_DIR}" locale-gen
+exit_if_bad "$?" "Failed to locale-gen"
+chroot "${DST_DIR}" update-locale LANG=en_US.UTF-8 LANGUAGE=en_US:en
+exit_if_bad "$?" "Failed to update-locale"
+
+# Install extra packages
+rm -rf "${DST_DIR}/var/lib/apt/"*
+chroot "${DST_DIR}" apt-get -o 'Acquire::ForceIPv4=true' update
+warn_if_bad "$?" "Failed to apt-get update"
+chroot "${DST_DIR}" apt-get -o 'Acquire::ForceIPv4=true' upgrade -y --fix-missing --allow-unauthenticated
+warn_if_bad "$?" "Failed to apt-get upgrade"
+chroot "${DST_DIR}" apt-get -o 'Acquire::ForceIPv4=true' install -y --allow-unauthenticated lvm2 
+warn_if_bad "$?" "Failed to apt-get install lvm2"
+chroot "${DST_DIR}" apt-get -o 'Acquire::ForceIPv4=true' clean
+warn_if_bad "$?" "Failed to apt-get clean"
+
+# Clean up unused kernel module directories
+for d in "${DST_DIR}/lib/modules/"*
+do
+	[ ! -f "${d}/modules.dep" ] && rm -rf "${d}"
+done
+unset d
+
+################################
+####   Create initrd.img    ####
+################################
+
+chroot "${DST_DIR}" bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
+exit_if_bad "$?" "Failed to create initrd.img"
+
+cp "${DST_DIR}/boot/initrd.img-"*"v7"* "${DST_DIR}/boot/initrd7.img"
+exit_if_bad "$?" "Failed to copy initrd.img"
+
+# Hack after chroot
+rm -f "${DST_DIR}/usr/bin/qemu-arm-static"
+
+umount "${DST_DIR}/proc"
+umount "${DST_DIR}/sys"
+umount "${DST_DIR}/dev/pts"
+umount "${DST_DIR}/dev"
+
+################################
+####      Final tweak       ####
+################################
+cat >>"${DST_DIR}/boot/config.txt" <<-'EOF'
+
+# Enable initrd.img
+initramfs initrd7.img followkernel
+EOF
+
+sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
+	-e 's| quiet||g' \
+	-e "s| root=[^ ]*| root=/dev/mapper/${TARGET_LVM_VG_NAME}-${TARGET_LVM_LV_000[0]}|" \
+	-e "s| rootfstype=[^ ]*| rootfstype=${TARGET_LVM_LV_000[3]}|" \
+	"${DST_DIR}/boot/cmdline.txt"
+
+
+################################
+####   Final examination    ####
+################################
+
+echo
+parted "${REFORMED_IMAGE}" -- "unit s" "print"
+
+DST_DIRS=()
+for e in ${!TARGET_LVM_LV_*}
+do
+	r="${e}[1]"
+	lvm_lv_mount="${!r}"
+
+	DST_DIRS+=("${DST_DIR}${lvm_lv_mount%/}")
+
+done
+unset e r lvm_lv_mount
+
+echo
+df -h "${SRC_DIR}" "${SRC_DIR}/boot" "${DST_DIRS[@]}" "${DST_DIR}/boot"
+
+echo
+cat "${DST_DIR}/etc/fstab"
+
+echo
+tail -n 3 "${DST_DIR}/boot/config.txt"
+
+echo
+cat "${DST_DIR}/boot/cmdline.txt"
