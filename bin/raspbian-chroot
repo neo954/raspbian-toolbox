@@ -1,0 +1,439 @@
+#!/bin/bash
+#
+# Run command or interactive shell inside the Raspbian image.
+#
+
+#
+# warn_if_bad		Put out warning message(s) if $1 has bad RC.
+#
+#	$1	0 (pass) or non-zero (fail).
+#	$2+	Remaining arguments printed only if the $1 is non-zero.
+#
+#	Incoming $1 is returned unless it is 0
+#
+function warn_if_bad()
+{
+	local -i rc="$1"
+	local script="${0##*/}"
+
+	# Ignore if no problems
+	[ "${rc}" -eq "0" ] && return 0
+
+	# Broken
+	shift
+	echo "${script}: $@" >&2
+	return "${rc}"
+}
+
+#
+# exit_if_bad		Put out error message(s) if $1 has bad RC.
+#
+#	$1	0 (pass) or non-zero (fail).
+#	$2+	Remaining arguments printed only if the $1 is non-zero.
+#
+#               Exits with 1 unless $1 is 0
+#
+function exit_if_bad()
+{
+	warn_if_bad "$@" || exit 1
+	return 0
+}
+
+#
+# check_root_or_exit
+#
+#	Breaks the script if not running as root.
+#
+#	If this returns 1, the invoker MUST abort the script.
+#
+#	Returns 0 if running as root
+#	Returns 1 if not (and breaks the script)
+#
+function check_root_or_exit()
+{
+	[ "${UID}" -eq "0" ]
+	exit_if_bad "$?" "Must be run by UID=0. Actual UID=${UID}."
+	return 0
+}
+
+#
+# check_executes	Check for executable(s)
+#
+#	Returns 0 if true.
+#	Returns 1 if not.
+#
+function check_executes()
+{
+	local cmd
+	local all_ok="yes"
+	for cmd in "$@"
+	do
+		if ! type "${cmd}" &>/dev/null
+		then
+			echo "Command \"${cmd}\" not found." >&2
+			all_ok="no"
+		fi
+	done
+	[ "${all_ok}" = "yes" ]
+}
+
+#
+# check_exec_or_exit	Check for required executables.
+#
+#	Exits (not returns) if commands listed on command line do not exist.
+#
+#	Returns 0 if true.
+#	Exits with 1 if not.
+#
+function check_exec_or_exit()
+{
+	check_executes "$@"
+	exit_if_bad "$?" "Above listed required command(s) not found."
+	return 0
+}
+
+TMP_DIR=""
+
+#
+# internal_setup	Script setup
+#
+#	Returns 0 on success.
+#	Exits (not returns) with 1 on failure.
+#
+function internal_setup()
+{
+	shopt -s extglob
+
+	# Trap exit for internal_cleanup function.
+	trap "internal_cleanup" EXIT
+
+	check_exec_or_exit mktemp rm
+
+	umask 0077
+
+	TMP_DIR="$(mktemp -d "/tmp/${0##*/}.XXXXXXXX" 2>/dev/null)"
+	[ -d "${TMP_DIR}" ]
+	exit_if_bad "$?" "Make temporary directory failed."
+
+	custom_setup
+}
+
+#
+# internal_cleanup	Script cleanup (reached via trap 0)
+#
+#	Destory any temporarily facility created by internal_setup.
+#
+function internal_cleanup()
+{
+	custom_cleanup
+
+	[ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}"
+}
+
+#
+# custom_setup
+#
+function custom_setup()
+{
+	check_exec_or_exit mount umount mkdir rm
+	check_exec_or_exit cat df parted sed tac losetup
+	check_exec_or_exit vgchange pvscan
+	check_exec_or_exit qemu-arm-static
+	check_root_or_exit
+}
+
+#
+#	$1	Base directory
+#
+function umount_all()
+{
+	local base_dir="$1"
+
+	while read -r dev dir type options
+	do
+		if [ "${base_dir}" = "${dir:0:${#base_dir}}" ]
+		then
+			umount "${dir}" 2>/dev/null || {
+				sleep 1 &&
+				umount "${dir}" 2>/dev/null
+			}
+			warn_if_bad "$?" "Fail to umount ${dir}"
+		fi
+	done < <(tac /proc/mounts)
+}
+
+#
+# custom_cleanup
+#
+function custom_cleanup()
+{
+	[ -n "${MOUNT_POINT}" ] && umount_all "${MOUNT_POINT}"
+
+	[ -n "${TARGET_LVM_VG_NAME}" ] &&
+		vgchange -a n "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+
+	local vg
+
+	vg="$(pvs --noheadings -o vg_name "${RASPBIAN_PART2_DEVICE}" 2>/dev/null)"
+	if [ -n "$vg" ]
+	then
+		vg="$(echo $vg)"
+		vgchange -a n "${vg}" >/dev/null 2>&1
+	fi
+
+	losetup -d "${RASPBIAN_PART2_DEVICE}" 2>/dev/null
+	losetup -d "${RASPBIAN_PART1_DEVICE}" 2>/dev/null
+
+	pvscan --cache 2>/dev/null
+}
+
+internal_setup
+
+function usage()
+{
+	local script="${0##*/}"
+
+	while read -r ; do echo "${REPLY}" ; done <<-EOF
+	Usage: ${script} [OPTION]... [IMAGE] [COMMAND]
+	Run command or interactive shell inside the Raspbian image.
+
+	Options:
+	  -h, --help                    display this help and exit
+
+	Example:
+	  ${script} /path/to/raspbian.img
+	  ${script} /path/to/raspbian.img useradd -m alex
+	  ${script} /path/to/raspbian.img passwd alex
+	EOF
+}
+
+while [ "$#" -gt "0" ]
+do
+	case "$1" in
+	"-h"|"--help")
+		usage
+		exit 0
+		;;
+	*)
+		[ "$1" == "--" ] && shift
+		[ -z "${RASPBIAN_IMAGE}" ]
+		warn_if_bad "$?" "redundancy command line argument -- \`$1'"
+		exit_if_bad "$?" "Try \`$0 --help' for more information"
+		RASPBIAN_IMAGE="$1"
+		shift
+		break
+		;;
+	esac
+	shift
+done
+
+if [ -n "$1" ]
+then
+	CHROOT_COMMAND=("$@")
+else
+	CHROOT_COMMAND=(/bin/bash -c 'cd ~ && exec -l bash')
+fi
+
+[ -z "${RASPBIAN_IMAGE}" ] && usage && exit 1
+[ -f "${RASPBIAN_IMAGE}" ]
+exit_if_bad "$?" "File not found -- \`${RASPBIAN_IMAGE}'"
+[ -r "${RASPBIAN_IMAGE}" ]
+exit_if_bad "$?" "Permission denied -- \`${RASPBIAN_IMAGE}'"
+
+while read -r e{0..6}
+do
+	case "${e0}" in
+	"Disk")
+		[ "${e1:0:1}" = "/" ] && RASPBIAN_IMAGE_SIZE="${e2}"
+		;;
+	"Sector")
+		RASPBIAN_SECTOR_SIZE="${e3%%/*}"
+		;;
+	"Partition")
+		RASPBIAN_PARTITION_TABLE="${e2}"
+		;;
+	"1")
+		RASPBIAN_PART1_OFFSET="$(( "${e1%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		RASPBIAN_PART1_SIZE="$(( "${e3%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		;;
+	"2")
+		RASPBIAN_PART2_OFFSET="$(( "${e1%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		RASPBIAN_PART2_SIZE="$(( "${e3%s}" * "${RASPBIAN_SECTOR_SIZE%B}" ))"
+		;;
+	esac
+done < <(parted "${RASPBIAN_IMAGE}" -- "unit s" "print")
+unset e{0..6}
+
+[ -n "${RASPBIAN_IMAGE_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_IMAGE_SIZE"
+[ -n "${RASPBIAN_SECTOR_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_SECTOR_SIZE"
+[ -n "${RASPBIAN_PARTITION_TABLE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PARTITION_TABLE"
+[ -n "${RASPBIAN_PART1_OFFSET}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART1_OFFSET"
+[ -n "${RASPBIAN_PART1_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART1_SIZE"
+[ -n "${RASPBIAN_PART2_OFFSET}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART2_OFFSET"
+[ -n "${RASPBIAN_PART2_SIZE}" ]
+exit_if_bad "$?" "Fail to parse RASPBIAN_PART2_SIZE"
+
+RASPBIAN_PART1_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 1"
+losetup --offset "${RASPBIAN_PART1_OFFSET}" \
+	--sizelimit "${RASPBIAN_PART1_SIZE}" \
+	"${RASPBIAN_PART1_DEVICE}" "${RASPBIAN_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 1"
+
+RASPBIAN_PART2_DEVICE="$(losetup -f 2>/dev/null)"
+exit_if_bad "$?" "Fail to get free loop device for partition 2"
+losetup --offset "${RASPBIAN_PART2_OFFSET}" \
+	--sizelimit "${RASPBIAN_PART2_SIZE}" \
+	"${RASPBIAN_PART2_DEVICE}" "${RASPBIAN_IMAGE}"
+exit_if_bad "$?" "Fail to setup loop device for partition 2"
+
+MOUNT_POINT="$(mktemp -d "/tmp/target.XXXXXXXX" 2>/dev/null)"
+[ -d "${MOUNT_POINT}" ]
+exit_if_bad "$?" "Make temporary mount point directory failed."
+
+#mount -o ro "${RASPBIAN_PART2_DEVICE}" "${MOUNT_POINT}"
+
+# Mount the boot partition
+mount -o ro "${RASPBIAN_PART1_DEVICE}" "${MOUNT_POINT}"
+
+# Find the real boot device
+while read -r line
+do
+	set -- ${line}
+	while [ -n "$1" ]
+	do
+		case "$1" in
+		"root="*)
+			RASPBIAN_ROOT_DEVICE="${1#root=}"
+			break 2
+			;;
+		esac
+		shift
+	done
+done <"${MOUNT_POINT}/cmdline.txt"
+
+umount "${MOUNT_POINT}"
+
+case "${RASPBIAN_ROOT_DEVICE}" in
+"/dev/mapper/"*"-"*)
+	# Active the LVM volume group first
+	TARGET_LVM_VG_NAME="${RASPBIAN_ROOT_DEVICE#/dev/mapper/}"
+	TARGET_LVM_VG_NAME="${TARGET_LVM_VG_NAME%-*}"
+	TARGET_LVM_VG_NAME="${TARGET_LVM_VG_NAME//--/-}"
+
+	[ -n "${TARGET_LVM_VG_NAME}" ]
+	exit_if_bad "$?" "LVM volume group name parsing failed."
+
+	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
+
+	vgchange -a y "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	exit_if_bad "$?" "LVM volume group activate failed."
+	;;
+"PARTUUID="*"-02")
+	RASPBIAN_ROOT_DEVICE="${RASPBIAN_PART2_DEVICE}"
+	;;
+"")
+	# Not found, try to guess one
+	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
+
+	TARGET_LVM_VG_NAME="$(pvs --noheadings -o vg_name "${RASPBIAN_PART2_DEVICE}" 2>/dev/null)"
+	TARGET_LVM_VG_NAME="$(echo ${TARGET_LVM_VG_NAME})"
+	[ -n "${TARGET_LVM_VG_NAME}" ]
+	exit_if_bad "$?" "Root device name parsing failed."
+
+	vgchange -a y "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	exit_if_bad "$?" "LVM volume group activate failed."
+
+	RASPBIAN_ROOT_DEVICE="/dev/mapper/${TARGET_LVM_VG_NAME//-/--}-root"
+	;;
+*)
+	exit_if_bad 1 "Unknown root device \`${RASPBIAN_ROOT_DEVICE}'"
+	;;
+esac
+
+[ -n "${RASPBIAN_ROOT_DEVICE}" ]
+exit_if_bad "$?" "Root device name parsing failed."
+[ -b "${RASPBIAN_ROOT_DEVICE}" ]
+exit_if_bad "$?" "Root device is not a block device - \`${RASPBIAN_ROOT_DEVICE}'."
+
+mount -o ro "${RASPBIAN_ROOT_DEVICE}" "${MOUNT_POINT}"
+exit_if_bad "$?" "Mount \`${RASPBIAN_ROOT_DEVICE}' as \`${MOUNT_POINT}' failed."
+
+# Look into /etc/fstab and mount other file systems
+while read -r file_system mount_point type options dump pass
+do
+	# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+
+	case "${pass}" in
+	"0")
+		continue
+		;;
+	esac
+
+	case "${mount_point}" in
+	"/")
+		# Do the remount
+		mount -o "remount,rw,${options}" \
+			"${RASPBIAN_ROOT_DEVICE}" "${MOUNT_POINT}"
+		exit_if_bad "$?" "Remount \`${RASPBIAN_ROOT_DEVICE}' as \`${MOUNT_POINT}' failed."
+		continue
+		;;
+	esac
+
+	case "${file_system}" in
+	"#"*|"")
+		continue
+		;;
+	"/dev/mapper/"*"-"*)
+		# Do nothing
+		;;
+	"/dev/"*)
+		exit_if_bad 1 "Unknown device name \`${file_system}'"
+		;;
+	"UUID="*|"PARTUUID="*)
+		case "${mount_point}" in
+		"/boot")
+			file_system="${RASPBIAN_PART1_DEVICE}"
+			;;
+		*)
+			exit_if_bad 1 "Unknown device name \`${file_system}'"
+			;;
+		esac
+		;;
+	*)
+		exit_if_bad 1 "Unknown device name \`${file_system}'"
+		;;
+	esac
+
+	mount -o "${options}" -t "${type}" "${file_system}" "${MOUNT_POINT}${mount_point}"
+	exit_if_bad "$?" "Mount \`${file_system}' as \`${MOUNT_POINT}${mount_point}' failed."
+done <"${MOUNT_POINT}/etc/fstab"	
+unset file_system mount_point type options dump pass
+
+# Hack before chroot
+mount --bind /dev     "${MOUNT_POINT}/dev"
+mount --bind /dev/pts "${MOUNT_POINT}/dev/pts"
+mount --bind /sys     "${MOUNT_POINT}/sys"
+mount --bind /proc    "${MOUNT_POINT}/proc"
+
+cp /usr/bin/qemu-arm-static "${MOUNT_POINT}/usr/bin"
+exit_if_bad "$?" "Failed to copy /usr/bin/qemu-arm-static"
+
+chroot "${MOUNT_POINT}" "${CHROOT_COMMAND[@]}"
+RET="$?"
+
+# Hack after chroot
+rm -f "${MOUNT_POINT}/usr/bin/qemu-arm-static"
+
+umount "${MOUNT_POINT}/proc"
+umount "${MOUNT_POINT}/sys"
+umount "${MOUNT_POINT}/dev/pts"
+umount "${MOUNT_POINT}/dev"
+
+exit "${RET}"
