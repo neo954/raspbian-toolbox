@@ -2,7 +2,7 @@
 
 Raspbian Toolbox is a collection of tools for Raspbian image customization.
 
-## Set up a developing environment for raspbian image customization
+## Set up a developing environment for Raspbian image customization
 
 ### The selection of Linux distro
 
@@ -28,13 +28,13 @@ Get the lastest Respbian from the official web site of Raspberry Pi [2]. The lit
 
 ### `raspbian-lvm-reform`
 
-Reform raspbian image to LVM partition layout.
+Reform Raspbian image to LVM partition layout.
 
 ```
-raspbian-lvm-reform /path/to/2018-06-27-raspbian-stretch-lite.img
+# raspbian-lvm-reform /path/to/raspbian.img
 ```
 
-This will generate a new image file in the same directory `/path/to/2018-06-27-raspbian-stretch-lite-lvm.img`. The default LVM partition layout look like this.
+This will generate a new image file `/path/to/raspbian-lvm.img`, which will be in the same directory, along with original image file. The default LVM partition layout look like the following.
 
 ```
 Filesystem             Size  Used Avail Use% Mounted on
