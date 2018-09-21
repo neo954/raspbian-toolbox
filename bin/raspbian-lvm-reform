@@ -217,7 +217,7 @@ function usage()
 	  -h, --help                    display this help and exit
 
 	Example:
-	  ${script} /path/to/2018-06-27-raspbian-stretch-lite.img
+	  ${script} /path/to/raspbian.img
 	EOF
 }
 
