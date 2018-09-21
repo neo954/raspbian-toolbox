@@ -155,12 +155,13 @@ function internal_cleanup()
 #
 function custom_setup()
 {
+	check_root_or_exit
 	check_exec_or_exit mount umount mkdir rm
 	check_exec_or_exit cat df dd parted sed tac losetup
 	check_exec_or_exit mkfs.vfat mkfs.ext4
 	check_exec_or_exit vgchange pvcreate vgcreate lvcreate pvscan
 	check_exec_or_exit qemu-arm-static
-	check_root_or_exit
+	check_exec_or_exit chroot
 }
 
 #
