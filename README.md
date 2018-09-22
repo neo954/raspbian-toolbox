@@ -139,5 +139,5 @@ Use `tar` is preferred for file copy.
 Example
 
 ```
-# ( cd /path/to/src && tar cf - ) | raspbian-chroot /path/to/raspbian.img bash -c 'cd /path/to/dst && tar xf -'
+# ( cd /path/to/src && tar cf - ) | raspbian-chroot /path/to/raspbian.img 'cd /path/to/dst && tar xf -'
 ```
