@@ -228,12 +228,17 @@ do
 	shift
 done
 
-if [ -n "$1" ]
-then
-	CHROOT_COMMAND=("$@")
-else
+case "$#" in
+"0")
 	CHROOT_COMMAND=(/bin/bash -c 'cd ~ && exec -l bash')
-fi
+	;;
+"1")
+	CHROOT_COMMAND=(/bin/bash -c "$1")
+	;;
+*)
+	CHROOT_COMMAND=("$@")
+	;;
+esac
 
 [ -z "${RASPBIAN_IMAGE}" ] && usage && exit 1
 [ -f "${RASPBIAN_IMAGE}" ]
