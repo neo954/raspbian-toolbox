@@ -438,12 +438,12 @@ do
 
 	case "${lvm_lv_fs}" in
 	"swap")
-		mkswap "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
-		exit_if_bad "$?" "Fail to mkswap /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
+		mkswap "/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkswap /dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}"
 		;;
 	*)
-		"mkfs.${lvm_lv_fs}" "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
-		exit_if_bad "$?" "Fail to mkfs.${lvm_lv_fs} /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
+		"mkfs.${lvm_lv_fs}" "/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkfs.${lvm_lv_fs} /dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}"
 		;;
 	esac
 done
@@ -466,8 +466,8 @@ do
 	mkdir -p "${DST_DIR}${lvm_lv_mount%/}"
 	exit_if_bad "$?" "Fail to mkdir ${DST_DIR}${lvm_lv_mount%/}"
 
-	mount "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" "${DST_DIR}${lvm_lv_mount%/}"
-	exit_if_bad "$?" "Fail to mount /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
+	mount "/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}" "${DST_DIR}${lvm_lv_mount%/}"
+	exit_if_bad "$?" "Fail to mount /dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}"
 done
 unset e r lvm_lv_{name,mount}
 
@@ -539,7 +539,7 @@ exit_if_bad "$?" "Failed to copy files"
 		esac
 
 		printf "%-15s %-15s %-7s %-15s %-7s %s\n" \
-			"/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" \
+			"/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${lvm_lv_name//-/--}" \
 			"${lvm_lv_mount}" "${lvm_lv_fs}" \
 			"${options}" "${dump}" "${pass}"
 
@@ -625,7 +625,7 @@ EOF
 
 sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
 	-e 's| quiet||g' \
-	-e "s| root=[^ ]*| root=/dev/mapper/${REFORMED_LVM_VG_NAME}-${REFORMED_LVM_LV_000[0]}|" \
+	-e "s| root=[^ ]*| root=/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${REFORMED_LVM_LV_000[0]//-/--}|" \
 	-e "s| rootfstype=[^ ]*| rootfstype=${REFORMED_LVM_LV_000[3]}|" \
 	"${DST_DIR}/boot/cmdline.txt"
 
