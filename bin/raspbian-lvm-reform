@@ -494,6 +494,17 @@ exit_if_bad "$?" "Failed to copy files"
 ) >"${DST_DIR}/etc/fstab"
 
 ################################
+####   Hack before chroot   ####
+################################
+mount --bind /dev     "${DST_DIR}/dev"
+mount --bind /dev/pts "${DST_DIR}/dev/pts"
+mount --bind /sys     "${DST_DIR}/sys"
+mount --bind /proc    "${DST_DIR}/proc"
+
+cp /usr/bin/qemu-arm-static "${DST_DIR}/usr/bin"
+exit_if_bad "$?" "Failed to copy /usr/bin/qemu-arm-static"
+
+################################
 #### Install extra packages ####
 ################################
 
@@ -506,22 +517,9 @@ cat >>"${DST_DIR}/etc/apt/sources.list" <<-EOF
 deb http://mirrors.tuna.tsinghua.edu.cn/raspbian/raspbian/ ${DEBIAN_CODENAME} main contrib non-free rpi
 EOF
 
-# Hack before chroot
-mount --bind /dev     "${DST_DIR}/dev"
-mount --bind /dev/pts "${DST_DIR}/dev/pts"
-mount --bind /sys     "${DST_DIR}/sys"
-mount --bind /proc    "${DST_DIR}/proc"
-
-cp /usr/bin/qemu-arm-static "${DST_DIR}/usr/bin"
-exit_if_bad "$?" "Failed to copy /usr/bin/qemu-arm-static"
-
 # Do the chroot works
 # Tweak /etc/resolv.conf
 grep '^nameserver' /etc/resolv.conf >"${DST_DIR}/etc/resolv.conf"
-
-# Enable the generation of initrd.img
-sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
-	"${DST_DIR}/etc/default/raspberrypi-kernel"
 
 # Change default locale to en_US.UTF-8
 sed -i  -e 's|en_GB.UTF-8 UTF-8|# en_GB.UTF-8 UTF-8|' \
@@ -555,19 +553,15 @@ unset d
 ####   Create initrd.img    ####
 ################################
 
+# Enable the generation of initrd.img
+sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
+	"${DST_DIR}/etc/default/raspberrypi-kernel"
+
 chroot "${DST_DIR}" bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
 exit_if_bad "$?" "Failed to create initrd.img"
 
 cp "${DST_DIR}/boot/initrd.img-"*"v7"* "${DST_DIR}/boot/initrd7.img"
 exit_if_bad "$?" "Failed to copy initrd.img"
-
-# Hack after chroot
-rm -f "${DST_DIR}/usr/bin/qemu-arm-static"
-
-umount "${DST_DIR}/proc"
-umount "${DST_DIR}/sys"
-umount "${DST_DIR}/dev/pts"
-umount "${DST_DIR}/dev"
 
 ################################
 ####      Final tweak       ####
@@ -584,6 +578,15 @@ sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
 	-e "s| rootfstype=[^ ]*| rootfstype=${TARGET_LVM_LV_000[3]}|" \
 	"${DST_DIR}/boot/cmdline.txt"
 
+################################
+####   Hack after chroot    ####
+################################
+rm -f "${DST_DIR}/usr/bin/qemu-arm-static"
+
+umount "${DST_DIR}/proc"
+umount "${DST_DIR}/sys"
+umount "${DST_DIR}/dev/pts"
+umount "${DST_DIR}/dev"
 
 ################################
 ####   Final examination    ####
