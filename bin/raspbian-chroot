@@ -170,8 +170,8 @@ function custom_cleanup()
 {
 	[ -n "${MOUNT_POINT}" ] && umount_all "${MOUNT_POINT}"
 
-	[ -n "${TARGET_LVM_VG_NAME}" ] &&
-		vgchange -a n "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	[ -n "${RASPBIAN_LVM_VG_NAME}" ] &&
+		vgchange -a n "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
 
 	local vg
 
@@ -329,16 +329,16 @@ umount "${MOUNT_POINT}"
 case "${RASPBIAN_ROOT_DEVICE}" in
 "/dev/mapper/"*"-"*)
 	# Active the LVM volume group first
-	TARGET_LVM_VG_NAME="${RASPBIAN_ROOT_DEVICE#/dev/mapper/}"
-	TARGET_LVM_VG_NAME="${TARGET_LVM_VG_NAME%-*}"
-	TARGET_LVM_VG_NAME="${TARGET_LVM_VG_NAME//--/-}"
+	RASPBIAN_LVM_VG_NAME="${RASPBIAN_ROOT_DEVICE#/dev/mapper/}"
+	RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME%-*}"
+	RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME//--/-}"
 
-	[ -n "${TARGET_LVM_VG_NAME}" ]
+	[ -n "${RASPBIAN_LVM_VG_NAME}" ]
 	exit_if_bad "$?" "LVM volume group name parsing failed."
 
 	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
 
-	vgchange -a y "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	vgchange -a y "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
 	exit_if_bad "$?" "LVM volume group activate failed."
 	;;
 "PARTUUID="*"-02")
@@ -348,15 +348,15 @@ case "${RASPBIAN_ROOT_DEVICE}" in
 	# Not found, try to guess one
 	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
 
-	TARGET_LVM_VG_NAME="$(pvs --noheadings -o vg_name "${RASPBIAN_PART2_DEVICE}" 2>/dev/null)"
-	TARGET_LVM_VG_NAME="$(echo ${TARGET_LVM_VG_NAME})"
-	[ -n "${TARGET_LVM_VG_NAME}" ]
+	RASPBIAN_LVM_VG_NAME="$(pvs --noheadings -o vg_name "${RASPBIAN_PART2_DEVICE}" 2>/dev/null)"
+	RASPBIAN_LVM_VG_NAME="$(echo ${RASPBIAN_LVM_VG_NAME})"
+	[ -n "${RASPBIAN_LVM_VG_NAME}" ]
 	exit_if_bad "$?" "Root device name parsing failed."
 
-	vgchange -a y "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	vgchange -a y "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
 	exit_if_bad "$?" "LVM volume group activate failed."
 
-	RASPBIAN_ROOT_DEVICE="/dev/mapper/${TARGET_LVM_VG_NAME//-/--}-root"
+	RASPBIAN_ROOT_DEVICE="/dev/mapper/${RASPBIAN_LVM_VG_NAME//-/--}-root"
 	;;
 *)
 	exit_if_bad 1 "Unknown root device \`${RASPBIAN_ROOT_DEVICE}'"
