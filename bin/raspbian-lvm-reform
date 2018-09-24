@@ -216,6 +216,7 @@ function usage()
 
 	Options:
 	  -h, --help                    display this help and exit
+	  -o, --output <file>           write reformed image to <file>
 
 	Example:
 	  ${script} /path/to/raspbian.img
@@ -228,6 +229,13 @@ do
 	"-h"|"--help")
 		usage
 		exit 0
+		;;
+	"-o"|"--output")
+		shift
+		REFORMED_IMAGE="$1"
+		;;
+	"--output="*)
+		REFORMED_IMAGE="${1#--output=}"
 		;;
 	"-"*)
 		warn_if_bad 1 "invalid option -- \`$1'"
@@ -248,7 +256,13 @@ done
 [ -f "${RASPBIAN_IMAGE}" ]
 exit_if_bad "$?" "File not found -- \`${RASPBIAN_IMAGE}'"
 [ -r "${RASPBIAN_IMAGE}" ]
-exit_if_bad "$?" "Permission denied -- \`${RASPBIAN_IMAGE}'"
+exit_if_bad "$?" "Permission denied reading from file -- \`${RASPBIAN_IMAGE}'"
+
+# Use the default image file name if no image file name was specified
+# in the command line argument,
+[ -z "${REFORMED_IMAGE}" ] && REFORMED_IMAGE="${RASPBIAN_IMAGE%.*}-reformed.img"
+{ >>"${REFORMED_IMAGE}"; } >/dev/null 2>&1
+exit_if_bad "$?" "Permission denied writing to file -- \`${REFORMED_IMAGE}'"
 
 parted "${RASPBIAN_IMAGE}" -- "unit s" "print"
 
@@ -310,7 +324,6 @@ mkdir -p "${SRC_DIR}"
 mount -o ro "${RASPBIAN_PART2_DEVICE}" "${SRC_DIR}"
 mount -o ro "${RASPBIAN_PART1_DEVICE}" "${SRC_DIR}/boot"
 
-REFORMED_IMAGE="${RASPBIAN_IMAGE%.*}-lvm.img"
 REFORMED_PARTITION_TABLE="${RASPBIAN_PARTITION_TABLE}"
 REFORMED_SECTOR_SIZE="${RASPBIAN_SECTOR_SIZE}"
 REFORMED_IMAGE_SIZE="$(( "${TARGET_IMAGE_SIZE_LIMIT%GB}" * ( 10 ** 9 ) / ( 2 ** 20 ) * ( 2 ** 20 ) / "${RASPBIAN_SECTOR_SIZE%B}" ))s"
