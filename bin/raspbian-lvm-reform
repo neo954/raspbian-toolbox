@@ -625,8 +625,36 @@ EOF
 
 sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
 	-e 's| quiet||g' \
-	-e "s| root=[^ ]*| root=/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-${REFORMED_LVM_LV_000[0]//-/--}|" \
-	-e "s| rootfstype=[^ ]*| rootfstype=${REFORMED_LVM_LV_000[3]}|" \
+	-e "s| root=[^ ]*| root=/dev/mapper/${REFORMED_LVM_VG_NAME//-/--}-$(
+		for e in ${!REFORMED_LVM_LV_*}
+		do
+			r="${e}[0]"
+			lvm_lv_name="${!r}"
+			r="${e}[1]"
+			lvm_lv_mount="${!r}"
+			if [ "${lvm_lv_mount}" = "/" ]
+			then
+				echo -n "${lvm_lv_name//-/--}"
+				break
+			fi
+		done
+		unset lvm_lv_name lvm_lv_mount
+	)|" \
+	-e "s| rootfstype=[^ ]*| rootfstype=$(
+		for e in ${!REFORMED_LVM_LV_*}
+		do
+			r="${e}[1]"
+			lvm_lv_mount="${!r}"
+			r="${e}[3]"
+			lvm_lv_fs="${!r}"
+			if [ "${lvm_lv_mount}" = "/" ]
+			then
+				echo -n "${lvm_lv_fs}"
+				break
+			fi
+		done
+		unset lvm_lv_mount lvm_lv_fs
+	)|" \
 	"${DST_DIR}/boot/cmdline.txt"
 
 ################################
