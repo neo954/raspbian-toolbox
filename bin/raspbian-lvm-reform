@@ -6,18 +6,18 @@
 ################################
 ####     Configurations     ####
 ################################
-TARGET_IMAGE_SIZE_LIMIT="6GB"
-TARGET_BOOT_PART_OFFSET="4MiB"
-TARGET_BOOT_PART_SIZE="200MiB"
-TARGET_LVM_VG_NAME="sd0"
-TARGET_LVM_LV_000=("root"  "/"          "512MiB" "ext4")
-TARGET_LVM_LV_001=("home"  "/home"      "512MiB" "ext4")
-TARGET_LVM_LV_002=("opt"   "/opt"       "512MiB" "ext4")
-TARGET_LVM_LV_003=("srv"   "/srv"       "128MiB" "ext4")
-TARGET_LVM_LV_004=("tmp"   "/tmp"       "512MiB" "ext4")
-TARGET_LVM_LV_005=("var"   "/var"      "1024MiB" "ext4")
-TARGET_LVM_LV_006=("usr"   "/usr"      "2048MiB" "ext4")
-TARGET_LVM_LV_007=("local" "/usr/local" "128MiB" "ext4")
+REFORMED_IMAGE_SIZE_LIMIT="6GB"
+REFORMED_BOOT_PART_OFFSET="4MiB"
+REFORMED_BOOT_PART_SIZE="200MiB"
+REFORMED_LVM_VG_NAME="sd0"
+REFORMED_LVM_LV_000=("root"  "/"          "512MiB" "ext4")
+REFORMED_LVM_LV_001=("home"  "/home"      "512MiB" "ext4")
+REFORMED_LVM_LV_002=("opt"   "/opt"       "512MiB" "ext4")
+REFORMED_LVM_LV_003=("srv"   "/srv"       "128MiB" "ext4")
+REFORMED_LVM_LV_004=("tmp"   "/tmp"       "512MiB" "ext4")
+REFORMED_LVM_LV_005=("var"   "/var"      "1024MiB" "ext4")
+REFORMED_LVM_LV_006=("usr"   "/usr"      "2048MiB" "ext4")
+REFORMED_LVM_LV_007=("local" "/usr/local" "128MiB" "ext4")
 ################################
 
 SRC_DIR="/tmp/source"
@@ -191,7 +191,7 @@ function custom_cleanup()
 {
 	umount_all "${DST_DIR}"
 
-	vgchange -a n "${TARGET_LVM_VG_NAME}" >/dev/null 2>&1
+	vgchange -a n "${REFORMED_LVM_VG_NAME}" >/dev/null 2>&1
 
 	pvscan --cache >/dev/null 2>&1
 
@@ -374,15 +374,15 @@ mount -o ro "${RASPBIAN_PART1_DEVICE}" "${SRC_DIR}/boot"
 
 REFORMED_PARTITION_TABLE="${RASPBIAN_PARTITION_TABLE}"
 REFORMED_SECTOR_SIZE="${RASPBIAN_SECTOR_SIZE}"
-REFORMED_IMAGE_SIZE="$(( "$(floor_to_mebibyte_boundary "${TARGET_IMAGE_SIZE_LIMIT}")" / "${REFORMED_SECTOR_SIZE%B}" ))s"
+REFORMED_IMAGE_SIZE="$(( "$(floor_to_mebibyte_boundary "${REFORMED_IMAGE_SIZE_LIMIT}")" / "${REFORMED_SECTOR_SIZE%B}" ))s"
 
 rm -f "${REFORMED_IMAGE}"
 dd if=/dev/zero "of=${REFORMED_IMAGE}" bs=1 count=1 \
 	"seek=$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - 1 ))" \
 	>/dev/null 2>&1
 
-REFORMED_PART1_OFFSET="$(size_in_bytes "${TARGET_BOOT_PART_OFFSET}")"
-REFORMED_PART1_SIZE="$(size_in_bytes "${TARGET_BOOT_PART_SIZE}")"
+REFORMED_PART1_OFFSET="$(size_in_bytes "${REFORMED_BOOT_PART_OFFSET}")"
+REFORMED_PART1_SIZE="$(size_in_bytes "${REFORMED_BOOT_PART_SIZE}")"
 
 REFORMED_PART2_OFFSET="$(( "${REFORMED_PART1_OFFSET}" + "${REFORMED_PART1_SIZE}" ))"
 REFORMED_PART2_SIZE="$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - "${REFORMED_PART2_OFFSET}" ))"
@@ -413,10 +413,10 @@ exit_if_bad "$?" "Fail to mkfs.vfat ${REFORMED_PART1_DEVICE}"
 pvcreate --yes --dataalignment 128K "${REFORMED_PART2_DEVICE}" >/dev/null
 exit_if_bad "$?" "Fail to create physical volume ${REFORMED_PART2_DEVICE}"
 
-vgcreate --yes "${TARGET_LVM_VG_NAME}" "${REFORMED_PART2_DEVICE}" >/dev/null
-exit_if_bad "$?" "Fail to create volume group ${TARGET_LVM_VG_NAME}"
+vgcreate --yes "${REFORMED_LVM_VG_NAME}" "${REFORMED_PART2_DEVICE}" >/dev/null
+exit_if_bad "$?" "Fail to create volume group ${REFORMED_LVM_VG_NAME}"
 
-for e in ${!TARGET_LVM_LV_*}
+for e in ${!REFORMED_LVM_LV_*}
 do
 	r="${e}[0]"
 	lvm_lv_name="${!r}"
@@ -424,12 +424,12 @@ do
 	lvm_lv_size="${!r}"
 
 	lvcreate --yes --size "$(size_in_bytes "${lvm_lv_size}")B" --name "${lvm_lv_name}" \
-		"${TARGET_LVM_VG_NAME}" >/dev/null
+		"${REFORMED_LVM_VG_NAME}" >/dev/null
 	exit_if_bad "$?" "Fail to create logical volume ${lvm_lv_name}"
 done
 unset e r lvm_lv_{name,size}
 
-for e in ${!TARGET_LVM_LV_*}
+for e in ${!REFORMED_LVM_LV_*}
 do
 	r="${e}[0]"
 	lvm_lv_name="${!r}"
@@ -438,12 +438,12 @@ do
 
 	case "${lvm_lv_fs}" in
 	"swap")
-		mkswap "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
-		exit_if_bad "$?" "Fail to mkswap /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+		mkswap "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkswap /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
 		;;
 	*)
-		"mkfs.${lvm_lv_fs}" "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
-		exit_if_bad "$?" "Fail to mkfs.${lvm_lv_fs} /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+		"mkfs.${lvm_lv_fs}" "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" >/dev/null 2>&1
+		exit_if_bad "$?" "Fail to mkfs.${lvm_lv_fs} /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
 		;;
 	esac
 done
@@ -451,7 +451,7 @@ unset e r lvm_lv_{name,fs}
 
 mkdir -p "${DST_DIR}"
 
-for e in ${!TARGET_LVM_LV_*}
+for e in ${!REFORMED_LVM_LV_*}
 do
 	r="${e}[0]"
 	lvm_lv_name="${!r}"
@@ -466,8 +466,8 @@ do
 	mkdir -p "${DST_DIR}${lvm_lv_mount%/}"
 	exit_if_bad "$?" "Fail to mkdir ${DST_DIR}${lvm_lv_mount%/}"
 
-	mount "/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" "${DST_DIR}${lvm_lv_mount%/}"
-	exit_if_bad "$?" "Fail to mount /dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}"
+	mount "/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" "${DST_DIR}${lvm_lv_mount%/}"
+	exit_if_bad "$?" "Fail to mount /dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}"
 done
 unset e r lvm_lv_{name,mount}
 
@@ -496,7 +496,7 @@ exit_if_bad "$?" "Failed to copy files"
 	# <file system> <mount point>   <type>  <options>       <dump>  <pass>
 	EOF
 
-	for e in ${!TARGET_LVM_LV_*}
+	for e in ${!REFORMED_LVM_LV_*}
 	do
 		r="${e}[0]"
 		lvm_lv_name="${!r}"
@@ -539,7 +539,7 @@ exit_if_bad "$?" "Failed to copy files"
 		esac
 
 		printf "%-15s %-15s %-7s %-15s %-7s %s\n" \
-			"/dev/mapper/${TARGET_LVM_VG_NAME}-${lvm_lv_name}" \
+			"/dev/mapper/${REFORMED_LVM_VG_NAME}-${lvm_lv_name}" \
 			"${lvm_lv_mount}" "${lvm_lv_fs}" \
 			"${options}" "${dump}" "${pass}"
 
@@ -625,8 +625,8 @@ EOF
 
 sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
 	-e 's| quiet||g' \
-	-e "s| root=[^ ]*| root=/dev/mapper/${TARGET_LVM_VG_NAME}-${TARGET_LVM_LV_000[0]}|" \
-	-e "s| rootfstype=[^ ]*| rootfstype=${TARGET_LVM_LV_000[3]}|" \
+	-e "s| root=[^ ]*| root=/dev/mapper/${REFORMED_LVM_VG_NAME}-${REFORMED_LVM_LV_000[0]}|" \
+	-e "s| rootfstype=[^ ]*| rootfstype=${REFORMED_LVM_LV_000[3]}|" \
 	"${DST_DIR}/boot/cmdline.txt"
 
 ################################
@@ -647,7 +647,7 @@ echo
 parted "${REFORMED_IMAGE}" -- "unit s" "print"
 
 DST_DIRS=()
-for e in ${!TARGET_LVM_LV_*}
+for e in ${!REFORMED_LVM_LV_*}
 do
 	r="${e}[1]"
 	lvm_lv_mount="${!r}"
