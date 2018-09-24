@@ -204,6 +204,54 @@ function custom_cleanup()
 	losetup -D "${RASPBIAN_PART1_DEVICE}" 2>/dev/null
 }
 
+#
+#	$1	The size to convert
+#
+function size_in_bytes()
+{
+	local size="$1"
+
+	case "${size}" in
+	*"GiB")
+		echo "$(( "${size%GiB}" * ( 2 ** 30 ) ))"
+		;;
+	*"MiB")
+		echo "$(( "${size%MiB}" * ( 2 ** 20 ) ))"
+		;;
+	*"KiB")
+		echo "$(( "${size%KiB}" * ( 2 ** 10 ) ))"
+		;;
+	*"GB")
+		echo "$(( "${size%GB}" * ( 10 ** 9 ) ))"
+		;;
+	*"MB")
+		echo "$(( "${size%MB}" * ( 10 ** 6 ) ))"
+		;;
+	*"KB")
+		echo "$(( "${size%KB}" * ( 10 ** 3 ) ))"
+		;;
+	*"B")
+		echo "${size%B}"
+		;;
+	*"S")
+		echo "$(( "${size%S}" * 512 ))"
+		;;
+	*)
+		exit_if_bad 1 "Parsing failure -- \`${size}'"
+		;;
+	esac
+}
+
+#
+#	$1	The size to round
+#
+function floor_to_mebibyte_boundary()
+{
+	local size="$1"
+
+	echo "$(( "$(size_in_bytes "${size}")" / ( 2 ** 20 ) * ( 2 ** 20 ) ))"
+}
+
 internal_setup
 
 function usage()
@@ -326,15 +374,15 @@ mount -o ro "${RASPBIAN_PART1_DEVICE}" "${SRC_DIR}/boot"
 
 REFORMED_PARTITION_TABLE="${RASPBIAN_PARTITION_TABLE}"
 REFORMED_SECTOR_SIZE="${RASPBIAN_SECTOR_SIZE}"
-REFORMED_IMAGE_SIZE="$(( "${TARGET_IMAGE_SIZE_LIMIT%GB}" * ( 10 ** 9 ) / ( 2 ** 20 ) * ( 2 ** 20 ) / "${RASPBIAN_SECTOR_SIZE%B}" ))s"
+REFORMED_IMAGE_SIZE="$(( "$(floor_to_mebibyte_boundary "${TARGET_IMAGE_SIZE_LIMIT}")" / "${REFORMED_SECTOR_SIZE%B}" ))s"
 
 rm -f "${REFORMED_IMAGE}"
 dd if=/dev/zero "of=${REFORMED_IMAGE}" bs=1 count=1 \
 	"seek=$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - 1 ))" \
 	>/dev/null 2>&1
 
-REFORMED_PART1_OFFSET="$(( "${TARGET_BOOT_PART_OFFSET%MiB}" * ( 2 ** 20 ) ))"
-REFORMED_PART1_SIZE="$(( "${TARGET_BOOT_PART_SIZE%MiB}" * ( 2 ** 20 ) ))"
+REFORMED_PART1_OFFSET="$(size_in_bytes "${TARGET_BOOT_PART_OFFSET}")"
+REFORMED_PART1_SIZE="$(size_in_bytes "${TARGET_BOOT_PART_SIZE}")"
 
 REFORMED_PART2_OFFSET="$(( "${REFORMED_PART1_OFFSET}" + "${REFORMED_PART1_SIZE}" ))"
 REFORMED_PART2_SIZE="$(( "${REFORMED_IMAGE_SIZE%s}" * "${REFORMED_SECTOR_SIZE%B}" - "${REFORMED_PART2_OFFSET}" ))"
@@ -375,7 +423,7 @@ do
 	r="${e}[2]"
 	lvm_lv_size="${!r}"
 
-	lvcreate --yes --size "${lvm_lv_size%MiB}M" --name "${lvm_lv_name}" \
+	lvcreate --yes --size "$(size_in_bytes "${lvm_lv_size}")B" --name "${lvm_lv_name}" \
 		"${TARGET_LVM_VG_NAME}" >/dev/null
 	exit_if_bad "$?" "Fail to create logical volume ${lvm_lv_name}"
 done
