@@ -521,16 +521,6 @@ EOF
 # Tweak /etc/resolv.conf
 grep '^nameserver' /etc/resolv.conf >"${DST_DIR}/etc/resolv.conf"
 
-# Change default locale to en_US.UTF-8
-sed -i  -e 's|en_GB.UTF-8 UTF-8|# en_GB.UTF-8 UTF-8|' \
-	-e 's|# en_US.UTF-8 UTF-8|en_US.UTF-8 UTF-8|' \
-	"${DST_DIR}/etc/locale.gen"
-
-chroot "${DST_DIR}" locale-gen
-exit_if_bad "$?" "Failed to locale-gen"
-chroot "${DST_DIR}" update-locale LANG=en_US.UTF-8 LANGUAGE=en_US:en
-exit_if_bad "$?" "Failed to update-locale"
-
 # Install extra packages
 rm -rf "${DST_DIR}/var/lib/apt/"*
 chroot "${DST_DIR}" apt-get -o 'Acquire::ForceIPv4=true' update
