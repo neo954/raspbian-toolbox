@@ -330,7 +330,12 @@ case "${RASPBIAN_ROOT_DEVICE}" in
 "/dev/mapper/"*"-"*)
 	# Active the LVM volume group first
 	RASPBIAN_LVM_VG_NAME="${RASPBIAN_ROOT_DEVICE#/dev/mapper/}"
-	RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME%-*}"
+	while
+		RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME%-*}"
+		[ "${RASPBIAN_LVM_VG_NAME: -1}" = "-" ]
+	do
+		:
+	done
 	RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME//--/-}"
 
 	[ -n "${RASPBIAN_LVM_VG_NAME}" ]
