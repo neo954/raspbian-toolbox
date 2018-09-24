@@ -303,10 +303,9 @@ MOUNT_POINT="$(mktemp -d "/tmp/target.XXXXXXXX" 2>/dev/null)"
 [ -d "${MOUNT_POINT}" ]
 exit_if_bad "$?" "Make temporary mount point directory failed."
 
-#mount -o ro "${RASPBIAN_PART2_DEVICE}" "${MOUNT_POINT}"
-
 # Mount the boot partition
 mount -o ro "${RASPBIAN_PART1_DEVICE}" "${MOUNT_POINT}"
+exit_if_bad "$?" "Fail to mount device \`${RASPBIAN_PART1_DEVICE}'"
 
 # Find the real boot device
 while read -r line
@@ -325,6 +324,7 @@ do
 done <"${MOUNT_POINT}/cmdline.txt"
 
 umount "${MOUNT_POINT}"
+exit_if_bad "$?" "Fail to umount directory \`${MOUNT_POINT}'"
 
 case "${RASPBIAN_ROOT_DEVICE}" in
 "/dev/mapper/"*"-"*)
@@ -334,7 +334,7 @@ case "${RASPBIAN_ROOT_DEVICE}" in
 		RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME%-*}"
 		[ "${RASPBIAN_LVM_VG_NAME: -1}" = "-" ]
 	do
-		:
+		continue
 	done
 	RASPBIAN_LVM_VG_NAME="${RASPBIAN_LVM_VG_NAME//--/-}"
 
@@ -344,27 +344,27 @@ case "${RASPBIAN_ROOT_DEVICE}" in
 	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
 
 	vgchange -a y "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
-	exit_if_bad "$?" "LVM volume group activate failed."
+	exit_if_bad "$?" "LVM volume group activation failed."
 	;;
 "PARTUUID="*"-02")
 	RASPBIAN_ROOT_DEVICE="${RASPBIAN_PART2_DEVICE}"
 	;;
-"")
-	# Not found, try to guess one
+*)
+	# Unknown pattern, try to do an educated guess
+	RASPBIAN_ROOT_DEVICE="${RASPBIAN_PART2_DEVICE}"
+
 	pvscan --cache "${RASPBIAN_PART2_DEVICE}"
 
 	RASPBIAN_LVM_VG_NAME="$(pvs --noheadings -o vg_name "${RASPBIAN_PART2_DEVICE}" 2>/dev/null)"
-	RASPBIAN_LVM_VG_NAME="$(echo ${RASPBIAN_LVM_VG_NAME})"
-	[ -n "${RASPBIAN_LVM_VG_NAME}" ]
-	exit_if_bad "$?" "Root device name parsing failed."
+	# Trimming
+	RASPBIAN_LVM_VG_NAME="$(echo -n ${RASPBIAN_LVM_VG_NAME})"
+	if [ -n "${RASPBIAN_LVM_VG_NAME}" ]
+	then
+		vgchange -a y "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
+		exit_if_bad "$?" "LVM volume group activation failed."
 
-	vgchange -a y "${RASPBIAN_LVM_VG_NAME}" >/dev/null 2>&1
-	exit_if_bad "$?" "LVM volume group activate failed."
-
-	RASPBIAN_ROOT_DEVICE="/dev/mapper/${RASPBIAN_LVM_VG_NAME//-/--}-root"
-	;;
-*)
-	exit_if_bad 1 "Unknown root device \`${RASPBIAN_ROOT_DEVICE}'"
+		RASPBIAN_ROOT_DEVICE="/dev/mapper/${RASPBIAN_LVM_VG_NAME//-/--}-root"
+	fi
 	;;
 esac
 
