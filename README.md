@@ -134,7 +134,7 @@ Example
 
 #### Copy files into the Raspbian image
 
-Use `tar` is preferred for file copy.
+Use of `tar` is preferred for file copy.
 
 Example
 
