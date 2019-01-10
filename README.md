@@ -6,7 +6,7 @@ Raspbian Toolbox is a collection of tools for Raspbian image customization.
 
 ### The selection of Linux distro
 
-Debian or Ubuntu is preferred for Raspbian image customization works. But other Linux distro can be used. Ido not see any obstruction here.
+Debian or Ubuntu is preferred for Raspbian image customization works. But other Linux distro can be used. I do not see any obstruction here.
 
 ### Set up Qemu User Emulation
 
