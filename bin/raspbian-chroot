@@ -424,7 +424,7 @@ do
 
 	mount -o "${options}" -t "${type}" "${file_system}" "${MOUNT_POINT}${mount_point}"
 	exit_if_bad "$?" "Mount \`${file_system}' as \`${MOUNT_POINT}${mount_point}' failed."
-done <"${MOUNT_POINT}/etc/fstab"	
+done <"${MOUNT_POINT}/etc/fstab"
 unset file_system mount_point type options dump pass
 
 # Hack before chroot
