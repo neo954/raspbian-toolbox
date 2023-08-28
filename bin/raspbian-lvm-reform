@@ -608,6 +608,10 @@ unset d
 sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
 	"${DST_DIR}/etc/default/raspberrypi-kernel"
 
+# Set compression method xz
+sed -i -e 's|^#\?COMPRESS=.*$|COMPRESS=xz|' \
+	"${DST_DIR}/etc/initramfs-tools/initramfs.conf"
+
 chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
 exit_if_bad "$?" "Failed to create initrd.img"
 
