@@ -612,10 +612,10 @@ sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
 sed -i -e 's|^#\?COMPRESS=.*$|COMPRESS=xz|' \
 	"${DST_DIR}/etc/initramfs-tools/initramfs.conf"
 
-chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
+chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *v8+); do /etc/kernel/postinst.d/initramfs-tools $k; done'
 exit_if_bad "$?" "Failed to create initrd.img"
 
-cp "${DST_DIR}/boot/initrd.img-"*"v8+"* "${DST_DIR}/boot/initrd8.img"
+cp "${DST_DIR}/boot/initrd.img-"*"v8+" "${DST_DIR}/boot/initrd8.img"
 exit_if_bad "$?" "Failed to copy initrd.img"
 
 ################################
