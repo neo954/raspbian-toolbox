@@ -611,16 +611,18 @@ sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
 chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
 exit_if_bad "$?" "Failed to create initrd.img"
 
-cp "${DST_DIR}/boot/initrd.img-"*"v7"* "${DST_DIR}/boot/initrd7.img"
+cp "${DST_DIR}/boot/initrd.img-"*"v8+"* "${DST_DIR}/boot/initrd8.img"
 exit_if_bad "$?" "Failed to copy initrd.img"
 
 ################################
 ####      Final tweak       ####
 ################################
+
+# Add the correct initrd image to the config.txt
 cat >>"${DST_DIR}/boot/config.txt" <<-'EOF'
 
 # Enable initrd.img
-initramfs initrd7.img followkernel
+initramfs initrd8.img followkernel
 EOF
 
 sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
