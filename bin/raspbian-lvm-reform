@@ -612,11 +612,41 @@ sed -i -e 's|^#\?INITRD=.*$|INITRD=Yes|' \
 sed -i -e 's|^#\?COMPRESS=.*$|COMPRESS=xz|' \
 	"${DST_DIR}/etc/initramfs-tools/initramfs.conf"
 
-chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *v8+); do /etc/kernel/postinst.d/initramfs-tools $k; done'
-exit_if_bad "$?" "Failed to create initrd.img"
+old_umask="$(umask)"
+umask 0022
 
-cp "${DST_DIR}/boot/initrd.img-"*"v8+" "${DST_DIR}/boot/initrd8.img"
-exit_if_bad "$?" "Failed to copy initrd.img"
+mkdir -p "${DST_DIR}/etc/initramfs/post-update.d/"
+
+cat >"${DST_DIR}/etc/initramfs/post-update.d/rpi-initrd" <<-'EOF'
+	#!/bin/bash
+
+	ABI="$1"
+	INITRD="$2"
+	BOOTDIR="${INITRD%/*}"
+
+	case "${ABI}" in
+	*"-v8"*)
+		mv "${INITRD}" "${BOOTDIR}/initrd8.img"
+		;;
+	*"-v7l"*)
+		mv "${INITRD}" "${BOOTDIR}/initrd7l.img"
+		;;
+	*"-v7"*)
+		mv "${INITRD}" "${BOOTDIR}/initrd7.img"
+		;;
+	*)
+		mv "${INITRD}" "${BOOTDIR}/initrd.img"
+		;;
+	esac
+EOF
+
+umask "${old_umask}"
+unset old_umask
+
+chmod 0755 "${DST_DIR}/etc/initramfs/post-update.d/rpi-initrd"
+
+chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
+exit_if_bad "$?" "Failed to create initrd.img"
 
 ################################
 ####      Final tweak       ####
@@ -625,8 +655,31 @@ exit_if_bad "$?" "Failed to copy initrd.img"
 # Add the correct initrd image to the config.txt
 cat >>"${DST_DIR}/boot/config.txt" <<-'EOF'
 
-# Enable initrd.img
+[pi1]
+# Enable initrd
+initramfs initrd.img followkernel
+
+[pi2]
+# Enable initrd
+initramfs initrd7.img followkernel
+
+[pi3]
+# Enable initrd
+initramfs initrd7.img followkernel
+
+[pi4]
+# Enable initrd
 initramfs initrd8.img followkernel
+
+[pi0]
+# Enable initrd
+initramfs initrd.img followkernel
+
+[pi02]
+# Enable initrd
+initramfs initrd7.img followkernel
+
+[all]
 EOF
 
 sed -i -e 's| init=/usr/lib/raspi-config/init_resize.sh||' \
