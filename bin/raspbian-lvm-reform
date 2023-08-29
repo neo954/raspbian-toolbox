@@ -646,7 +646,7 @@ unset old_umask
 chmod 0755 "${DST_DIR}/etc/initramfs/post-update.d/rpi-initrd"
 
 chroot "${DST_DIR}" env LANG=en_GB.UTF-8 bash -c 'for k in $(cd /lib/modules && echo *); do /etc/kernel/postinst.d/initramfs-tools $k; done'
-exit_if_bad "$?" "Failed to create initrd.img"
+exit_if_bad "$?" "Failed to create initrd image"
 
 ################################
 ####      Final tweak       ####
